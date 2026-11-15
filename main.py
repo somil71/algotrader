@@ -9,7 +9,7 @@ from scanner import TechnicalScanner
 from telegram_bot import AlgoTelegramBot
 from kotak_broker import KotakNeoBroker
 from order_planner import CustomOrderPlanner
-import yfinance as yf
+from orchestrator import MultiAgentOrchestrator
 
 # Configure logging
 logging.basicConfig(
@@ -18,17 +18,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Main")
 
+# ─── Core System Initialization ───────────────────────────────────────────────
 portfolio = PortfolioManager()
 scanner = TechnicalScanner()
 planner = CustomOrderPlanner()
 broker = KotakNeoBroker()
 broker.initialize()
 
+# ─── Multi-Agent Orchestrator ─────────────────────────────────────────────────
+orchestrator = MultiAgentOrchestrator(portfolio=portfolio, scanner=scanner)
+
+
+# ─── APScheduler Jobs (delegated to Orchestrator) ─────────────────────────────
 async def monitor_positions_job(context):
-    """Checks open positions for SL/Target AND monitors Father's planned watch orders."""
+    """Agent 1: Monitor open positions + planned orders every 2 minutes."""
+    # Run orchestrator position monitor (Trade Monitor Agent)
+    await orchestrator.job_monitor_positions(context)
+
+    # Also check Father's custom planned orders
     active_positions = portfolio.state.get("active_positions", {})
     pending_planned = planner.get_pending_orders()
-
     tickers_to_check = set(active_positions.keys())
     for p in pending_planned:
         tickers_to_check.add(p["ticker"])
@@ -36,6 +45,7 @@ async def monitor_positions_job(context):
     if not tickers_to_check:
         return
 
+    import yfinance as yf
     tickers = list(tickers_to_check)
     try:
         data = yf.download(tickers, period="1d", interval="1m", progress=False)
@@ -44,35 +54,15 @@ async def monitor_positions_job(context):
             ticker = tickers[0]
             if not data.empty and "Close" in data:
                 close_val = data["Close"]
-                current_prices[ticker] = float(close_val.values[-1]) if hasattr(close_val, 'values') else float(close_val.iloc[-1])
+                current_prices[ticker] = float(close_val.values[-1])
         else:
             for t in tickers:
-                if t in data["Close"]:
+                if "Close" in data and t in data["Close"]:
                     series = data["Close"][t].dropna()
                     if not series.empty:
                         current_prices[t] = float(series.iloc[-1])
 
-        # 1. Check Exit Triggers for open positions
-        closed_trades = portfolio.check_exits(current_prices)
-        if closed_trades and config.TELEGRAM_CHAT_ID:
-            for trade in closed_trades:
-                pnl = trade["pnl"]
-                icon = "🎯" if "Target" in trade["reason"] else "🛑"
-                alert_text = (
-                    f"{icon} <b>TRADE EXIT NOTIFICATION</b>\n\n"
-                    f"Stock: <b>{trade['ticker'].replace('.NS', '')}</b>\n"
-                    f"Result: <b>{trade['reason']}</b>\n"
-                    f"Exit Price: ₹{trade['exit_price']:,.2f}\n"
-                    f"Profit/Loss: <b>₹{pnl:+,.2f} ({trade['pnl_pct']:+.2f}%)</b>\n"
-                    f"Quantity: {trade['quantity']} shares"
-                )
-                await context.bot.send_message(
-                    chat_id=int(config.TELEGRAM_CHAT_ID),
-                    text=alert_text,
-                    parse_mode="HTML"
-                )
-
-        # 2. Check Custom Planned Orders
+        # Check Father's planned trigger orders
         triggered_plans = planner.check_triggers(current_prices)
         if triggered_plans and config.TELEGRAM_CHAT_ID:
             algo_bot = context.application.bot_data.get("algo_bot")
@@ -90,41 +80,29 @@ async def monitor_positions_job(context):
                     "quantity": plan["quantity"],
                     "total_investment": round(plan["quantity"] * plan["triggered_price"], 2),
                     "max_risk_amount": round(plan["quantity"] * (plan["triggered_price"] - plan["stop_loss"]), 2),
-                    "risk_pct_of_capital": round((plan["quantity"] * (plan["triggered_price"] - plan["stop_loss"]) / config.INITIAL_CAPITAL) * 100, 2),
+                    "risk_pct_of_capital": round(
+                        (plan["quantity"] * (plan["triggered_price"] - plan["stop_loss"]) / config.INITIAL_CAPITAL) * 100, 2
+                    ),
                     "reason": f"Stock reached your planned trigger price of ₹{plan['trigger_price']}!"
                 }
                 if algo_bot:
                     await algo_bot.send_signal_alert(context.bot, int(config.TELEGRAM_CHAT_ID), sig)
 
     except Exception as e:
-        logger.error(f"Error in monitor_positions_job: {e}")
+        logger.error(f"Error in monitor_positions_job (planned orders): {e}")
+
+
+async def news_global_job(context):
+    """Agent 2: Morning briefing at 9 AM IST + intraday alerts every 2 hours."""
+    await orchestrator.job_news_global(context)
+
 
 async def scheduled_scanner_job(context):
-    """Runs periodic scan during trading hours."""
-    now = datetime.now()
-    current_time_val = now.hour * 60 + now.minute
-    market_start = config.MARKET_OPEN_HOUR * 60 + config.MARKET_OPEN_MINUTE
-    market_end = config.MARKET_CLOSE_HOUR * 60 + config.MARKET_CLOSE_MINUTE
+    """Agent 3: Scan + correlation validation every 30 minutes during market hours."""
+    await orchestrator.job_market_scan(context)
 
-    if not (market_start <= current_time_val <= market_end):
-        logger.info("Outside market hours. Skipping scheduled scan.")
-        return
 
-    logger.info("Starting scheduled market scan...")
-    summary = portfolio.get_summary()
-    signals = scanner.scan_all(
-        available_cash=summary["cash_balance"],
-        total_capital=summary["initial_capital"],
-        active_tickers=list(summary["active_positions"].keys())
-    )
-
-    if signals and config.TELEGRAM_CHAT_ID:
-        for sig in signals:
-            # Send signal card via bot
-            algo_bot = context.application.bot_data.get("algo_bot")
-            if algo_bot:
-                await algo_bot.send_signal_alert(context.bot, int(config.TELEGRAM_CHAT_ID), sig)
-
+# ─── Cloud Health Server ───────────────────────────────────────────────────────
 class CloudHealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -135,6 +113,7 @@ class CloudHealthHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return  # Suppress health check spam in console
 
+
 def start_health_server():
     port = int(os.environ.get("PORT", "8080"))
     try:
@@ -144,6 +123,8 @@ def start_health_server():
     except Exception as e:
         logger.warning(f"Could not bind health-check server: {e}")
 
+
+# ─── Main Entry Point ──────────────────────────────────────────────────────────
 def main():
     if not config.TELEGRAM_BOT_TOKEN:
         print("\n" + "="*60)
@@ -152,21 +133,35 @@ def main():
         print("="*60 + "\n")
         return
 
-    algo_bot = AlgoTelegramBot(portfolio, scanner, broker)
+    algo_bot = AlgoTelegramBot(portfolio, scanner, broker, orchestrator=orchestrator)
     app = algo_bot.build_application()
     app.bot_data["algo_bot"] = algo_bot
 
-    # Set up background jobs
-    if app.job_queue:
-        app.job_queue.run_repeating(monitor_positions_job, interval=120, first=10)
-        app.job_queue.run_repeating(scheduled_scanner_job, interval=1800, first=60)
-        logger.info("JobQueue scheduled: position monitor (2m) and market scanner (30m).")
+    # Wire orchestrator → bot reference for correlation-enriched signal alerts
+    orchestrator.set_bot(algo_bot)
 
-    # Start background cloud health-check server if deployed to cloud (Render, Railway, etc.)
+    # ─── Schedule all 3 agent jobs ───
+    if app.job_queue:
+        # Agent 1: Position Monitor — every 2 minutes
+        app.job_queue.run_repeating(monitor_positions_job, interval=120, first=15)
+
+        # Agent 2: News & Global — every 2 hours (also checks for 9 AM morning briefing)
+        app.job_queue.run_repeating(news_global_job, interval=7200, first=30)
+
+        # Agent 3: Scanner + Correlation — every 30 minutes
+        app.job_queue.run_repeating(scheduled_scanner_job, interval=1800, first=60)
+
+        logger.info("✅ APScheduler: All 3 agent jobs registered.")
+        logger.info("   Agent 1 — Trade Monitor:   every 2 min (starts in 15s)")
+        logger.info("   Agent 2 — News & Global:   every 2 hours (starts in 30s)")
+        logger.info("   Agent 3 — Scanner+Correl:  every 30 min (starts in 60s)")
+
+    # Start background cloud health-check server
     threading.Thread(target=start_health_server, daemon=True).start()
 
-    logger.info("🚀 AlgoTrader Bot is online and listening for Telegram commands!")
+    logger.info("🚀 AlgoTrader Multi-Agent Bot is LIVE!")
     app.run_polling()
+
 
 if __name__ == "__main__":
     try:

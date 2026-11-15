@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 from typing import Dict, Any, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -17,13 +17,14 @@ from ai_layer import AITradingAnalyst
 logger = logging.getLogger("TelegramBot")
 
 class AlgoTelegramBot:
-    def __init__(self, portfolio: PortfolioManager, scanner: TechnicalScanner, broker: Optional[KotakNeoBroker] = None):
+    def __init__(self, portfolio: PortfolioManager, scanner: TechnicalScanner, broker: Optional[KotakNeoBroker] = None, orchestrator=None):
         self.portfolio = portfolio
         self.scanner = scanner
         self.planner = CustomOrderPlanner()
         self.ai_analyst = AITradingAnalyst()
         self.broker = broker or KotakNeoBroker()
         self.broker.initialize()
+        self.orchestrator = orchestrator  # MultiAgentOrchestrator reference
         self.token = config.TELEGRAM_BOT_TOKEN
         self.chat_id = config.TELEGRAM_CHAT_ID
         self.signals_file = config.BASE_DIR / "pending_signals.json"
@@ -67,7 +68,12 @@ class AlgoTelegramBot:
         self.app.add_handler(CommandHandler("pnl", self.cmd_pnl))
         self.app.add_handler(CommandHandler("ai", self.cmd_ai))
         self.app.add_handler(CommandHandler("close", self.cmd_close))
-        
+
+        # ── Multi-Agent Commands ──
+        self.app.add_handler(CommandHandler("news", self.cmd_news))
+        self.app.add_handler(CommandHandler("correlate", self.cmd_correlate))
+        self.app.add_handler(CommandHandler("agents", self.cmd_agents))
+
         # Register inline button callback handler
         self.app.add_handler(CallbackQueryHandler(self.handle_callback))
 
@@ -260,7 +266,7 @@ class AlgoTelegramBot:
         for sig in signals:
             await self.send_signal_alert(context.bot, update.effective_chat.id, sig)
 
-    async def send_signal_alert(self, bot, chat_id: int, sig: Dict[str, Any]):
+    async def send_signal_alert(self, bot, chat_id: int, sig: Dict[str, Any], corr_result: Optional[Dict] = None):
         sig_id = f"{sig['symbol']}_{int(sig['ltp'])}"
         self.pending_signals[sig_id] = sig
         self._save_pending_signals()
@@ -417,6 +423,60 @@ class AlgoTelegramBot:
         await update.message.reply_text("🤖 <i>Analyzing database trade records with AI layer...</i>", parse_mode="HTML")
         review = self.ai_analyst.generate_journal_review()
         await update.message.reply_text(review, parse_mode="HTML")
+
+    async def cmd_news(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Fetch live global market snapshot + news headlines."""
+        await update.message.reply_text("🌐 <i>Fetching global markets and news... (takes ~10 seconds)</i>", parse_mode="HTML")
+        try:
+            if self.orchestrator:
+                msg = await self.orchestrator.handle_news_command()
+            else:
+                # Fallback: direct call
+                from agents.agent_news_global import NewsGlobalAgent
+                agent = NewsGlobalAgent([])
+                msg = await agent.run_on_demand()
+            await update.message.reply_text(msg, parse_mode="HTML")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ News fetch failed: {e}", parse_mode="HTML")
+
+    async def cmd_correlate(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show correlated sector peers for a given stock symbol."""
+        args = context.args
+        if not args:
+            await update.message.reply_text(
+                "📊 Usage: <code>/correlate INFY</code> or <code>/correlate HDFCBANK</code>\n"
+                "Shows sector peers and whether they confirm or diverge from the signal.",
+                parse_mode="HTML"
+            )
+            return
+        symbol = args[0].upper()
+        await update.message.reply_text(f"🔗 <i>Analyzing sector correlation for {symbol}...</i>", parse_mode="HTML")
+        try:
+            if self.orchestrator:
+                msg = await self.orchestrator.handle_correlate_command(symbol)
+            else:
+                from agents.agent_stock_research import CorrelationResearchAgent
+                agent = CorrelationResearchAgent([])
+                ticker = symbol if symbol.endswith(".NS") else symbol + ".NS"
+                msg = await agent.run_on_demand(ticker)
+            await update.message.reply_text(msg, parse_mode="HTML")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Correlation analysis failed: {e}", parse_mode="HTML")
+
+    async def cmd_agents(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show status of all running agents."""
+        try:
+            if self.orchestrator:
+                msg = self.orchestrator.get_status_report()
+            else:
+                msg = (
+                    "🤖 <b>Multi-Agent Status</b>\n\n"
+                    "⚠️ Orchestrator not initialized yet.\n"
+                    "Restart the bot to activate all agents."
+                )
+            await update.message.reply_text(msg, parse_mode="HTML")
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ Error: {e}", parse_mode="HTML")
 
     async def cmd_close(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         args = context.args
