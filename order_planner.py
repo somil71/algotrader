@@ -6,7 +6,8 @@ from datetime import datetime
 import config
 
 logger = logging.getLogger("OrderPlanner")
-PLANNER_FILE = Path("E:/TRADING/custom_orders.json")
+BASE_DIR = Path(__file__).resolve().parent
+PLANNER_FILE = BASE_DIR / "custom_orders.json"
 
 class CustomOrderPlanner:
     """

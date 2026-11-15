@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("TradingDatabase")
-DB_PATH = Path("E:/TRADING/trading_journal.db")
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "trading_journal.db"
 
 class TradingDatabase:
     """

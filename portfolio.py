@@ -7,7 +7,8 @@ import config
 from database import TradingDatabase
 
 logger = logging.getLogger("Portfolio")
-PORTFOLIO_FILE = Path("E:/TRADING/paper_portfolio.json")
+BASE_DIR = Path(__file__).resolve().parent
+PORTFOLIO_FILE = BASE_DIR / "paper_portfolio.json"
 
 class PortfolioManager:
     def __init__(self, filepath: Path = PORTFOLIO_FILE, db: Optional[TradingDatabase] = None):
