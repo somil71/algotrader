@@ -1,0 +1,56 @@
+{
+  "initial_capital": 100000.0,
+  "cash_balance": 17245.4,
+  "realized_pnl": 0.0,
+  "active_positions": {
+    "TECHM.NS": {
+      "ticker": "TECHM.NS",
+      "strategy": "Bullish 20 EMA Pullback \ud83d\udcc8",
+      "quantity": 14,
+      "entry_price": 1764.0,
+      "total_cost": 24696.0,
+      "stop_loss": 1696.51,
+      "target": 1898.98,
+      "entry_time": "2026-11-15 14:01:30",
+      "current_price": 1764.0,
+      "highest_price": 1764.0
+    },
+    "INFY.NS": {
+      "ticker": "INFY.NS",
+      "strategy": "Bullish 20 EMA Pullback \ud83d\udcc8",
+      "initial_quantity": 18,
+      "quantity": 18,
+      "entry_price": 1141.5,
+      "total_cost": 20547.0,
+      "stop_loss": 1087.16,
+      "initial_stop_loss": 1087.16,
+      "target_1": 1223.01,
+      "target_2": 1304.52,
+      "target": 1223.01,
+      "atr": 36.23,
+      "t1_hit": false,
+      "entry_time": "2026-11-15 14:07:15",
+      "current_price": 1141.5,
+      "highest_price": 1141.5
+    },
+    "RELIANCE.NS": {
+      "ticker": "RELIANCE.NS",
+      "strategy": "20-Day Breakout + Volume Surge \ud83d\ude80",
+      "initial_quantity": 28,
+      "quantity": 28,
+      "entry_price": 1339.7,
+      "total_cost": 37511.6,
+      "stop_loss": 1304.5,
+      "initial_stop_loss": 1304.5,
+      "target_1": 1392.5,
+      "target_2": 1445.3,
+      "target": 1392.5,
+      "atr": 25.0,
+      "t1_hit": false,
+      "entry_time": "2026-11-15 14:15:12",
+      "current_price": 1339.7,
+      "highest_price": 1339.7
+    }
+  },
+  "trade_history": []
+}

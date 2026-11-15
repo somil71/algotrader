@@ -1,0 +1,20 @@
+{
+  "RELIANCE_1339": {
+    "ticker": "RELIANCE.NS",
+    "symbol": "RELIANCE",
+    "strategy": "20-Day Breakout + Volume Surge \ud83d\ude80",
+    "ltp": 1339.7,
+    "entry_price": 1339.7,
+    "stop_loss": 1304.5,
+    "target_1": 1392.5,
+    "target_2": 1445.3,
+    "target": 1392.5,
+    "atr": 25.0,
+    "quantity": 28,
+    "total_investment": 37511.6,
+    "max_risk_amount": 985.6,
+    "risk_pct_of_capital": 0.99,
+    "risk_reward_ratio": 1.5,
+    "reason": "Institutional Momentum: Stock breaking 20-day high with heavy volume accumulation."
+  }
+}
